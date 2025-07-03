@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    container_name: similar-tones-app
+    working_dir: /app
+    volumes:
+      # ソースコードをマウント
+      - .:/app
+      # Hugging Faceキャッシュディレクトリをマウント（CLAPモデル用）
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    # environment:
+      # GPU利用の場合（現在無効化）
+      # - NVIDIA_VISIBLE_DEVICES=all
+    # GPU対応（NVIDIA Container Toolkit必要 - 現在無効化）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # 開発用：コンテナを起動し続ける
+    tty: true
+    stdin_open: true
