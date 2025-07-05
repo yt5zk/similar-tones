@@ -9,9 +9,8 @@ import logging
 from typing import Optional
 from .interface import EmbeddingModelInterface
 
-# TODO: 以下のインポートは後のステップで実装
-# import torch
-# from transformers import ClapModel as HFClapModel, ClapProcessor
+import torch
+from transformers import ClapModel as HFClapModel, ClapProcessor
 
 
 logger = logging.getLogger(__name__)
@@ -43,15 +42,31 @@ class ClapModel(EmbeddingModelInterface):
         """
         Hugging FaceからCLAPモデルをロード
         """
-        # TODO: 実装
-        # 1. transformers.ClapModel.from_pretrained() でモデルロード
-        # 2. transformers.ClapProcessor.from_pretrained() でプロセッサロード
-        # 3. デバイス設定（GPU/CPU）
-        # 4. モデルを評価モードに設定
-        
-        logger.info("CLAP model loading is not implemented yet")
-        # self.model = HFClapModel.from_pretrained(self.MODEL_NAME)
-        # self.processor = ClapProcessor.from_pretrained(self.MODEL_NAME)
+        try:
+            logger.info(f"Loading CLAP model: {self.MODEL_NAME}")
+            
+            # 1. モデルとプロセッサをロード
+            self.model = HFClapModel.from_pretrained(self.MODEL_NAME)
+            self.processor = ClapProcessor.from_pretrained(self.MODEL_NAME)
+            
+            # 2. デバイス設定
+            if self.device is None:
+                # 自動デバイス選択
+                self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            self.model.to(self.device)
+            logger.info(f"CLAP model loaded on device: {self.device}")
+            
+            # 3. 評価モードに設定（推論のみ）
+            self.model.eval()
+            
+            # 4. 設定確認
+            logger.info(f"Audio sampling rate: {self.processor.feature_extractor.sampling_rate}Hz")
+            logger.info(f"Max audio length: {self.processor.feature_extractor.max_length_s}s")
+            
+        except Exception as e:
+            logger.error(f"Failed to load CLAP model: {e}")
+            raise RuntimeError(f"CLAP model loading failed: {e}")
     
     def get_embedding(self, audio_data: np.ndarray) -> np.ndarray:
         """
@@ -68,13 +83,40 @@ class ClapModel(EmbeddingModelInterface):
         
         logger.debug(f"Generating embedding for audio data: {audio_data.shape}")
         
-        # TODO: 実装
-        # 1. プロセッサで音声データを前処理
-        # 2. モデルで推論実行
-        # 3. 音声特徴量を抽出
-        # 4. NumPy配列として返却
-        
-        raise NotImplementedError("get_embedding method not implemented yet")
+        try:
+            # 1. プロセッサで音声データを前処理
+            # sampling_rate=48000を明示的に指定（AudioLoaderの出力仕様）
+            inputs = self.processor(
+                audios=audio_data,
+                sampling_rate=48000,
+                return_tensors="pt"
+            )
+            
+            # 2. デバイスに移動
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            # 3. モデルで推論実行（勾配計算無効化）
+            with torch.no_grad():
+                outputs = self.model.get_audio_features(**inputs)
+            
+            # 4. 埋め込みベクトルを抽出してNumPy配列に変換
+            embedding = outputs.cpu().numpy()
+            
+            # バッチ次元を除去（1次元の埋め込みベクトルとして返却）
+            if embedding.shape[0] == 1:
+                embedding = embedding[0]
+            
+            logger.debug(f"Generated embedding shape: {embedding.shape}")
+            
+            # 埋め込み次元数を検証
+            if embedding.shape[0] != self.EMBEDDING_DIMENSION:
+                logger.warning(f"Unexpected embedding dimension: {embedding.shape[0]} (expected: {self.EMBEDDING_DIMENSION})")
+            
+            return embedding.astype(np.float32)
+            
+        except Exception as e:
+            logger.error(f"Failed to generate embedding: {e}")
+            raise RuntimeError(f"Embedding generation failed: {e}")
     
     def get_embedding_dimension(self) -> int:
         """
