@@ -6,37 +6,197 @@
 
 特定のオーディオサンプルに音色が類似するシンセサイザーのプリセットを検索するCLIアプリケーションです。
 
+CLAP（Contrastive Language-Audio Pre-training）モデルを使用して音声の埋め込みベクトルを生成し、コサイン類似度による検索を行います。
+
+## 機能
+
+- **インデックス作成**: プリセット音源ディレクトリから検索用インデックスを生成
+- **類似検索**: ターゲット音源に類似するプリセットを検索
+- **複数形式対応**: WAV/OGG形式の音声ファイルをサポート
+- **出力形式**: コンソール表示またはCSV出力
+
 ## 開発環境
 
 ### 前提条件
 
 - Docker
-- Docker Compose
+- Git
 
 ### セットアップ
 
 ```bash
-# コンテナをビルドして起動
-docker compose up -d --build
+# リポジトリをクローン
+git clone <repository-url>
+cd similar-tones
 
-# コンテナに入る
-docker compose exec app bash
-
-# 依存関係をインストール（コンテナ内で）
-poetry install
+# Dockerイメージをビルド
+docker build -t similar-tones-dev .
 ```
 
 ### テスト実行
 
 ```bash
-# 環境疎通テスト
-docker compose exec app poetry run pytest tests/test_environment.py
+# 全テストを実行
+docker run --rm -v "$(pwd):/app" -w /app similar-tones-dev python -m pytest
+
+# 特定のテストを実行
+docker run --rm -v "$(pwd):/app" -w /app similar-tones-dev python -m pytest tests/test_audio_loader.py -v
 ```
 
 ## 使用方法
 
-（実装完了後に追記予定）
+### 基本的な使用手順
+
+#### 1. インデックス作成
+
+```bash
+# プリセットディレクトリからインデックスを作成
+python run_cli.py index /path/to/preset/directory index.pkl
+```
+
+#### 2. 類似検索
+
+```bash
+# コンソール出力
+python run_cli.py search target_audio.wav index.pkl --top-k 5
+
+# CSV出力
+python run_cli.py search target_audio.wav index.pkl --top-k 10 --output results.csv
+```
+
+### Docker経由での実行
+
+```bash
+# インデックス作成
+docker run --rm \
+  -v "/path/to/presets:/presets:ro" \
+  -v "$(pwd):/app" -w /app \
+  similar-tones-dev \
+  python run_cli.py index /presets preset_index.pkl
+
+# 類似検索
+docker run --rm \
+  -v "/path/to/audio:/audio:ro" \
+  -v "$(pwd):/app" -w /app \
+  similar-tones-dev \
+  python run_cli.py search /audio/target.wav preset_index.pkl --top-k 5
+```
+
+### 大量データでの実行
+
+```bash
+# 長時間実行時（バックグラウンド + スリープ防止）
+caffeinate -i nohup docker run --rm \
+  -v "/path/to/presets:/presets:ro" \
+  -v "$(pwd):/app" -w /app \
+  similar-tones-dev \
+  python run_cli.py index /presets large_index.pkl \
+  > index_creation.log 2>&1 &
+
+# 進捗確認
+tail -f index_creation.log
+grep "Processing" index_creation.log | wc -l
+```
+
+## コマンドリファレンス
+
+### index コマンド
+
+プリセット音源からインデックスファイルを作成します。
+
+```bash
+python run_cli.py index [OPTIONS] PRESET_DIR OUTPUT
+```
+
+**引数:**
+- `PRESET_DIR`: プリセット音源のディレクトリパス
+- `OUTPUT`: インデックスファイルの出力パス
+
+### search コマンド
+
+類似音色プリセットを検索します。
+
+```bash
+python run_cli.py search [OPTIONS] TARGET INDEX
+```
+
+**引数:**
+- `TARGET`: ターゲット音源のパス
+- `INDEX`: インデックスファイルのパス
+
+**オプション:**
+- `--top-k INTEGER`: 取得する類似プリセット数 (default: 10)
+- `--output PATH`: CSV結果の出力パス（指定しない場合は標準出力）
+
+## 技術仕様
+
+### アーキテクチャ
+
+- **AudioLoader**: 音声ファイル読み込み・前処理（48kHz mono変換）
+- **ClapModel**: CLAP埋め込みベクトル生成（512次元）
+- **VectorStore**: ベクトル永続化・類似検索（コサイン類似度）
+- **SearchService**: 全コンポーネント統合
+- **ResultFormatter**: 検索結果整形・出力
+
+### サポート形式
+
+- **音声形式**: WAV, OGG
+- **サンプリングレート**: 任意（内部で48kHzに変換）
+- **チャンネル**: モノラル・ステレオ（内部でモノラルに変換）
+
+### 性能
+
+- **インデックス作成**: 約1秒/ファイル（CLAPロード除く）
+- **検索速度**: 数千ファイルでも1秒未満
+- **メモリ使用量**: 約2-3GB（CLAPモデル含む）
 
 ## 開発状況
 
-現在Step 0（開発環境構築）を実施中です。
+### 完了済み
+
+- ✅ Step 0: 開発環境構築（Docker + requirements.txt）
+- ✅ Step 1: プロジェクト構造・CLI骨格
+- ✅ Step 2: AudioLoader（音声読み込み・前処理）
+- ✅ Step 3: ClapModel（CLAP埋め込みベクトル生成）
+- ✅ Step 4: VectorStore（永続化・類似検索）
+- ✅ Step 5: SearchService（全コンポーネント統合）
+- ✅ Step 6: CLI統合（完全なアプリケーション）
+
+### テスト状況
+
+- **ユニットテスト**: 54テストケース全合格
+- **統合テスト**: AudioLoader + CLAP + VectorStore + CLI
+- **実データテスト**: 11プリセットでの検索精度確認
+
+## トラブルシューティング
+
+### CLAPモデルロードが遅い
+
+CLAPモデルの初回ロードには1-2分かかります。これは正常な動作です。
+
+### メモリ不足エラー
+
+CLAPモデルは約2-3GBのメモリを使用します。十分なメモリがあることを確認してください。
+
+### 音声ファイルが認識されない
+
+サポートされている形式はWAVとOGGのみです。他の形式はサポートされていません。
+
+### 検索結果が期待と異なる
+
+CLAPモデルは音色の特徴を学習していますが、主観的な音色評価とは異なる場合があります。
+
+## ライセンス
+
+MIT License
+
+## 貢献
+
+バグ報告や機能要望は Issues でお願いします。
+
+## 関連技術
+
+- [CLAP: Contrastive Language-Audio Pre-training](https://github.com/LAION-AI/CLAP)
+- [Hugging Face Transformers](https://huggingface.co/transformers/)
+- [librosa](https://librosa.org/)
+- [Typer](https://typer.tiangolo.com/)
