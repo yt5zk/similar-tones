@@ -68,6 +68,8 @@ Thumbs.db
 # Project specific
 index.bin
 *.csv
+*.pkl
+*.log
 test_data/
 temp/
 
